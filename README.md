@@ -1,40 +1,273 @@
-Below are the steps to get your plugin running. You can also find instructions at:
+# Figma Plugin Vue Template
 
-  https://www.figma.com/plugin-docs/plugin-quickstart-guide/
+Template for building Figma plugins using Vue.js.
 
-This plugin template uses Typescript and NPM, two standard tools in creating JavaScript applications.
+## Features
 
-First, download Node.js which comes with NPM. This will allow you to install TypeScript and other
-libraries. You can find the download link here:
+- 🔄 Vue 3 Composition API
+- 📦 Vite for fast development and building
+- 🎨 TypeScript support
+- 🧱 Component-based architecture
+- 🔌 Easy communication between UI and plugin code
+- 🖌️ SCSS/CSS styling support
 
-  https://nodejs.org/en/download/
+## Getting Started
 
-Next, install TypeScript using the command:
+### Prerequisites
 
-  npm install -g typescript
+- [Node.js](https://nodejs.org/) (v16 or higher)
+- [Figma Desktop App](https://www.figma.com/downloads/)
 
-Finally, in the directory of your plugin, get the latest type definitions for the plugin API by running:
+### Installation
 
-  npm install --save-dev @figma/plugin-typings
+1. Clone this repository or use it as a template:
 
-If you are familiar with JavaScript, TypeScript will look very familiar. In fact, valid JavaScript code
-is already valid Typescript code.
+```bash
+git clone https://github.com/WGR-SA/figma-plugin-vue-template
+# or
+# Click "Use this template" on GitHub
+```
 
-TypeScript adds type annotations to variables. This allows code editors such as Visual Studio Code
-to provide information about the Figma API while you are writing code, as well as help catch bugs
-you previously didn't notice.
+2. Navigate to the project directory:
 
-For more information, visit https://www.typescriptlang.org/
+```bash
+cd figma-plugin-vue-template
+```
 
-Using TypeScript requires a compiler to convert TypeScript (code.ts) into JavaScript (code.js)
-for the browser to run.
+3. Install dependencies:
 
-We recommend writing TypeScript code using Visual Studio code:
+```bash
+npm install
+# or
+yarn
+```
 
-1. Download Visual Studio Code if you haven't already: https://code.visualstudio.com/.
-2. Open this directory in Visual Studio Code.
-3. Compile TypeScript to JavaScript: Run the "Terminal > Run Build Task..." menu item,
-    then select "npm: watch". You will have to do this again every time
-    you reopen Visual Studio Code.
+### Development
 
-That's it! Visual Studio Code will regenerate the JavaScript file every time you save.
+1. Start the development server:
+
+```bash
+npm run dev
+# or
+yarn dev
+```
+
+2. Open the Figma desktop app.
+
+3. Go to `Plugins > Development > Import plugin from manifest...`
+
+4. Select the `manifest.json` file from your project directory.
+
+5. Run your plugin via `Plugins > Development > [Your Plugin Name]`
+
+### Building for Production
+
+```bash
+npm run build
+# or
+yarn build
+```
+
+This will generate a production-ready build in the `dist` directory.
+
+## Project Structure
+
+```
+figma-plugin-vue-template/
+├── ui-src/
+│   ├── assets/            # Assets
+│   ├── components/        # Vue components
+│   ├── composables/       # Vue composables
+│   ├── App.vue            # Main UI component
+│   ├── ui.html            # HTML template
+│   └── main.ts            # Entry point for UI
+├── plugin-src/            # Figma plugin code
+├── manifest.json          # Figma plugin manifest
+└── vite.config.ts         # Vite config
+```
+
+## Communication Between UI and Plugin
+
+### The `useFigma` Composable
+
+This template includes a Vue composable that manages communication between your Vue UI and the Figma plugin code:
+
+```typescript
+// src/composables/useFigma.ts
+import { ref, onMounted, onUnmounted } from 'vue'
+
+interface FigmaMessage {
+  type: string
+  [key: string]: unknown
+}
+
+export function useFigma() {
+  const isConnected = ref(false)
+  const error = ref<string | null>(null)
+  const messageQueue = ref<FigmaMessage[]>([])
+
+  // Handler for receiving messages from Figma
+  const handleMessage = (event: MessageEvent) => {
+    const { type, payload } = event.data.pluginMessage || {}
+
+    if (!type) {
+      console.warn('Received message without type:', event.data)
+      return
+    }
+
+    switch (type) {
+      case 'CONNECTED':
+        isConnected.value = true
+        break
+      case 'ERROR':
+        error.value = payload?.message || 'Unknown error occurred'
+        break
+      default:
+        messageQueue.value.push({ type, payload })
+    }
+  }
+
+  const postMessage = (message: FigmaMessage) => {
+    if (!isConnected.value) {
+      console.warn('Not connected to Figma')
+      return
+    }
+
+    try {
+      parent.postMessage({ pluginMessage: message }, 'https://www.figma.com')
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to post message'
+    }
+  }
+
+  const clearError = () => {
+    error.value = null
+  }
+
+  const clearMessageQueue = () => {
+    messageQueue.value = []
+  }
+
+  onMounted(() => {
+    window.addEventListener('message', handleMessage)
+    isConnected.value = true
+  })
+
+  onUnmounted(() => {
+    window.removeEventListener('message', handleMessage)
+    isConnected.value = false
+    clearMessageQueue()
+    clearError()
+  })
+
+  return {
+    isConnected,
+    error,
+    messageQueue,
+    postMessage,
+    clearError,
+    clearMessageQueue
+  }
+}
+```
+
+### Using the Composable in Components:
+
+```typescript
+// In a Vue component
+<script setup lang="ts">
+import { useFigma } from '@/composables/useFigma'
+import { watch } from 'vue'
+
+const { isConnected, error, messageQueue, postMessage, clearMessageQueue } = useFigma()
+
+// Send a message to the Figma plugin
+function selectNode(id: string) {
+  postMessage({ 
+    type: 'SELECT_NODE', 
+    payload: { id } 
+  })
+}
+
+// Watch for incoming messages from the plugin
+watch(messageQueue, (messages) => {
+  messages.forEach(msg => {
+    if (msg.type === 'SELECTION_CHANGED') {
+      // Handle selection changed event
+      console.log('Selection changed:', msg.payload)
+    }
+  })
+  
+  // Clear the queue after processing
+  clearMessageQueue()
+}, { deep: true })
+</script>
+```
+
+### From Plugin to UI:
+
+```typescript
+// In code.ts
+figma.ui.postMessage({ 
+  type: 'SELECTION_CHANGED', 
+  payload: { 
+    selectedNodes: figma.currentPage.selection.map(node => node.id)
+  } 
+})
+```
+
+## Customization
+
+### Plugin Information
+
+Edit the `manifest.json` file to update your plugin's name, ID, and other metadata.
+
+### UI Styling
+
+The template uses SCSS for styling. You can customize the global styles in the `src/styles` directory.
+
+### Understanding the Figma Composable
+
+The `useFigma` composable provides several key features:
+
+1. **Connection Management**:
+   - Automatically connects to the Figma plugin environment
+   - Tracks connection state with `isConnected` ref
+   - Cleans up event listeners when component is unmounted
+
+2. **Error Handling**:
+   - Captures and exposes communication errors
+   - Provides utilities to clear errors as needed
+
+3. **Message Queue**:
+   - Maintains a queue of incoming messages from the plugin
+   - Lets you process messages in batches or individually
+   - Provides utility to clear the queue after processing
+
+4. **Bidirectional Communication**:
+   - `postMessage()` sends messages to the plugin
+   - Automatically captures incoming messages
+   - Standardizes message format with type and payload structure
+
+## Deploying to Figma
+
+To publish your plugin to the Figma Community:
+
+1. Build your plugin for production.
+2. Go to the Figma desktop app.
+3. Navigate to `Plugins > Development > [Your Plugin Name] > Manage published plugin`.
+4. Follow the instructions to publish your plugin.
+
+## Additional Resources
+
+- [Figma Plugin API Documentation](https://www.figma.com/plugin-docs/)
+- [Vue.js Documentation](https://vuejs.org/guide/introduction.html)
+- [Vite Documentation](https://vitejs.dev/guide/)
+
+## License
+
+MIT
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
